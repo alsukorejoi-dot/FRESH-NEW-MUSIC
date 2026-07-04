@@ -1,7 +1,7 @@
 import { User, TargetTrack, CloudConfig, AppData, WeeklySchedule, DayConfig } from '../types';
 import { STORAGE_KEY, STORAGE_KEY_USERS, STORAGE_KEY_CLOUD, STORAGE_KEY_SPOTIFY, DEFAULT_TRACKS, DEFAULT_CLOUD_CONFIG, DEFAULT_SPOTIFY_ID, ADMIN_PIN } from '../constants';
 import { db } from './firebase';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, runTransaction } from 'firebase/firestore';
 
 // --- CLOUD STORAGE SERVICE (Firebase Firestore Adapter) ---
 
@@ -120,18 +120,42 @@ export const storageService = {
 
 
   async registerUser(newUser: User): Promise<User> {
-    const data = await this._fetchFullData();
-    const users = Array.isArray(data.users) ? data.users : [];
-    
-    if (users.some(u => u.appUsername.toLowerCase() === newUser.appUsername.toLowerCase())) {
-      throw new Error('Username already taken');
+    try {
+        const docRef = doc(db, 'appData', 'main');
+        await runTransaction(db, async (transaction) => {
+            const docSnap = await transaction.get(docRef);
+            if (!docSnap.exists()) throw new Error("FIREBASE_EMPTY");
+            
+            const record = docSnap.data();
+            const users = Array.isArray(record.users) ? record.users : [];
+            
+            if (users.some((u: User) => u.appUsername.toLowerCase() === newUser.appUsername.toLowerCase())) {
+              throw new Error('Username already taken');
+            }
+            
+            const updatedUsers = [...users, newUser];
+            transaction.update(docRef, { users: updatedUsers });
+        });
+        
+        const data = await this._fetchFullData();
+        this._updateLocalCache(data);
+        return newUser;
+    } catch (e: any) {
+        if (e.message === 'Username already taken') throw e;
+        
+        const data = await this._fetchFullData();
+        const users = Array.isArray(data.users) ? data.users : [];
+        
+        if (users.some(u => u.appUsername.toLowerCase() === newUser.appUsername.toLowerCase())) {
+          throw new Error('Username already taken');
+        }
+        
+        const updatedUsers = [...users, newUser];
+        const newData = { ...data, users: updatedUsers };
+        
+        await this._saveFullData(newData);
+        return newUser;
     }
-    
-    const updatedUsers = [...users, newUser];
-    const newData = { ...data, users: updatedUsers };
-    
-    await this._saveFullData(newData);
-    return newUser;
   },
 
   async loginUser(username: string, password: string): Promise<User> {
@@ -147,44 +171,91 @@ export const storageService = {
   },
 
   async updateUserCheckIn(userId: string, dateString: string, usedLastFmUsername: string | string[]): Promise<User> {
-    const data = await this._fetchFullData();
-    const users = Array.isArray(data.users) ? data.users : [];
-    let updatedUser: User | null = null;
-    
-    // Track Last Fm Account usage to prevent 1 account being used multiple times a day
-    const dailyUsedMap = data.dailyUsedLastFmAccounts || {};
-    const usedToday = dailyUsedMap[dateString] || [];
-    
-    if (usedLastFmUsername) {
-        const usernames = Array.isArray(usedLastFmUsername) ? usedLastFmUsername : [usedLastFmUsername];
-        usernames.forEach(username => {
-            if (!usedToday.includes(username)) {
-                usedToday.push(username);
+    let finalUpdatedUser: User | null = null;
+    try {
+        const docRef = doc(db, 'appData', 'main');
+        await runTransaction(db, async (transaction) => {
+            const docSnap = await transaction.get(docRef);
+            if (!docSnap.exists()) throw new Error("FIREBASE_EMPTY");
+            
+            const record = docSnap.data();
+            const users = Array.isArray(record.users) ? record.users : [];
+            const dailyUsedMap = record.dailyUsedLastFmAccounts || {};
+            const usedToday = dailyUsedMap[dateString] || [];
+            
+            if (usedLastFmUsername) {
+                const usernames = Array.isArray(usedLastFmUsername) ? usedLastFmUsername : [usedLastFmUsername];
+                usernames.forEach((username: string) => {
+                    if (!usedToday.includes(username)) {
+                        usedToday.push(username);
+                    }
+                });
+                dailyUsedMap[dateString] = usedToday;
             }
+            
+            const newUsers = users.map((u: User) => {
+              if (u.id === userId) {
+                const history = u.checkInHistory || [];
+                if (!history.includes(dateString)) {
+                  history.push(dateString);
+                }
+                const todayStr = new Date().toLocaleDateString();
+                const newLastCheckIn = dateString === todayStr ? dateString : u.lastCheckInDate;
+                
+                finalUpdatedUser = { ...u, lastCheckInDate: newLastCheckIn, checkInHistory: history };
+                return finalUpdatedUser;
+              }
+              return u;
+            });
+            
+            if (!finalUpdatedUser) throw new Error('User not found');
+            
+            transaction.update(docRef, { users: newUsers, dailyUsedLastFmAccounts: dailyUsedMap });
         });
-        dailyUsedMap[dateString] = usedToday;
-    }
-
-    const newUsers = users.map(u => {
-      if (u.id === userId) {
-        const history = u.checkInHistory || [];
-        if (!history.includes(dateString)) {
-          history.push(dateString);
-        }
-        // If checking in for today, update lastCheckInDate as well for backward compatibility
-        const todayStr = new Date().toLocaleDateString();
-        const newLastCheckIn = dateString === todayStr ? dateString : u.lastCheckInDate;
         
-        updatedUser = { ...u, lastCheckInDate: newLastCheckIn, checkInHistory: history };
-        return updatedUser;
-      }
-      return u;
-    });
-
-    if (!updatedUser) throw new Error('User not found');
+        const data = await this._fetchFullData();
+        this._updateLocalCache(data);
+        return finalUpdatedUser!;
+    } catch (e: any) {
+        if (e.message === 'User not found') throw e;
+        
+        const data = await this._fetchFullData();
+        const users = Array.isArray(data.users) ? data.users : [];
+        let updatedUser: User | null = null;
+        
+        const dailyUsedMap = data.dailyUsedLastFmAccounts || {};
+        const usedToday = dailyUsedMap[dateString] || [];
+        
+        if (usedLastFmUsername) {
+            const usernames = Array.isArray(usedLastFmUsername) ? usedLastFmUsername : [usedLastFmUsername];
+            usernames.forEach(username => {
+                if (!usedToday.includes(username)) {
+                    usedToday.push(username);
+                }
+            });
+            dailyUsedMap[dateString] = usedToday;
+        }
     
-    await this._saveFullData({ ...data, users: newUsers, dailyUsedLastFmAccounts: dailyUsedMap });
-    return updatedUser!;
+        const newUsers = users.map(u => {
+          if (u.id === userId) {
+            const history = u.checkInHistory || [];
+            if (!history.includes(dateString)) {
+              history.push(dateString);
+            }
+            const todayStr = new Date().toLocaleDateString();
+            const newLastCheckIn = dateString === todayStr ? dateString : u.lastCheckInDate;
+            
+            updatedUser = { ...u, lastCheckInDate: newLastCheckIn, checkInHistory: history };
+            return updatedUser;
+          }
+          return u;
+        });
+    
+        if (!updatedUser) throw new Error('User not found');
+        
+        await this._saveFullData({ ...data, users: newUsers, dailyUsedLastFmAccounts: dailyUsedMap });
+        return updatedUser!;
+    }
   },
 
   async isLastFmAccountUsed(dateString: string, username: string): Promise<boolean> {
@@ -196,29 +267,75 @@ export const storageService = {
 
   // NEW: Method to update user profile (Last.fm, Password, etc.)
   async updateUserProfile(userId: string, updates: Partial<User>): Promise<User> {
-    const data = await this._fetchFullData();
-    const users = Array.isArray(data.users) ? data.users : [];
-    let updatedUser: User | null = null;
+    let finalUpdatedUser: User | null = null;
+    try {
+        const docRef = doc(db, 'appData', 'main');
+        await runTransaction(db, async (transaction) => {
+            const docSnap = await transaction.get(docRef);
+            if (!docSnap.exists()) throw new Error("FIREBASE_EMPTY");
+            
+            const record = docSnap.data();
+            const users = Array.isArray(record.users) ? record.users : [];
+            
+            const newUsers = users.map((u: User) => {
+              if (u.id === userId) {
+                finalUpdatedUser = { ...u, ...updates };
+                return finalUpdatedUser;
+              }
+              return u;
+            });
+            
+            if (!finalUpdatedUser) throw new Error('User not found');
+            transaction.update(docRef, { users: newUsers });
+        });
+        
+        const data = await this._fetchFullData();
+        this._updateLocalCache(data);
+        return finalUpdatedUser!;
+    } catch(e: any) {
+        if (e.message === 'User not found') throw e;
+        
+        const data = await this._fetchFullData();
+        const users = Array.isArray(data.users) ? data.users : [];
+        let updatedUser: User | null = null;
+        
+        const newUsers = users.map(u => {
+          if (u.id === userId) {
+            updatedUser = { ...u, ...updates };
+            return updatedUser;
+          }
+          return u;
+        });
     
-    const newUsers = users.map(u => {
-      if (u.id === userId) {
-        updatedUser = { ...u, ...updates };
-        return updatedUser;
-      }
-      return u;
-    });
-
-    if (!updatedUser) throw new Error('User not found');
-    
-    await this._saveFullData({ ...data, users: newUsers });
-    return updatedUser!;
+        if (!updatedUser) throw new Error('User not found');
+        
+        await this._saveFullData({ ...data, users: newUsers });
+        return updatedUser!;
+    }
   },
 
   async deleteUser(userId: string): Promise<void> {
-    const data = await this._fetchFullData();
-    const users = Array.isArray(data.users) ? data.users : [];
-    const newUsers = users.filter(u => u.id !== userId);
-    await this._saveFullData({ ...data, users: newUsers });
+    try {
+        const docRef = doc(db, 'appData', 'main');
+        await runTransaction(db, async (transaction) => {
+            const docSnap = await transaction.get(docRef);
+            if (!docSnap.exists()) throw new Error("FIREBASE_EMPTY");
+            
+            const record = docSnap.data();
+            const users = Array.isArray(record.users) ? record.users : [];
+            const newUsers = users.filter((u: User) => u.id !== userId);
+            
+            transaction.update(docRef, { users: newUsers });
+        });
+        
+        const data = await this._fetchFullData();
+        this._updateLocalCache(data);
+    } catch(e: any) {
+        const data = await this._fetchFullData();
+        const users = Array.isArray(data.users) ? data.users : [];
+        const newUsers = users.filter(u => u.id !== userId);
+        await this._saveFullData({ ...data, users: newUsers });
+    }
   },
 
   // --- SMART GETTERS FOR MEMBER VIEW ---
