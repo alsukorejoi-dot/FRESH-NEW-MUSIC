@@ -701,8 +701,8 @@ export const MemberView: React.FC<MemberViewProps> = ({ weeklySchedule, currentU
       {/* User Header */}
       <div className="w-full flex justify-between items-center mb-4 bg-white/5 p-4 rounded-2xl border border-white/10 hover:bg-white/10 transition-colors cursor-pointer" onClick={openProfile}>
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center font-bold text-xl uppercase shadow-lg shadow-purple-500/20 shrink-0">
-            {currentUser.appUsername.charAt(0)}
+          <div className="w-12 h-12 rounded-full bg-gradient-to-r from-blue-500 to-purple-500 flex items-center justify-center font-bold text-xl uppercase shadow-lg shadow-purple-500/20 shrink-0 overflow-hidden">
+            <img src={`https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(currentUser.appUsername)}`} alt="Avatar" className="w-full h-full object-cover" />
           </div>
           <div className="flex flex-col">
             <div className="text-xs text-gray-400">FRESH NEW MUSIC</div>
@@ -958,7 +958,7 @@ export const MemberView: React.FC<MemberViewProps> = ({ weeklySchedule, currentU
              
              {/* Avatar (Moved OUTSIDE scrollable area to prevent clipping) */}
              <div className="absolute top-16 left-1/2 transform -translate-x-1/2 w-24 h-24 rounded-full bg-[#16133a] border-4 border-[#0f0c29] flex items-center justify-center shadow-[0_0_20px_rgba(0,0,0,0.5)] z-30">
-                <div className="text-3xl font-bold text-white uppercase">{currentUser.appUsername.charAt(0)}</div>
+                <img src={`https://api.dicebear.com/9.x/bottts/svg?seed=${encodeURIComponent(currentUser.appUsername)}`} alt="Avatar" className="w-full h-full rounded-full object-cover bg-gradient-to-r from-blue-500 to-purple-500" />
                 {!isEditingProfile && (
                     <button 
                     onClick={() => setIsEditingProfile(true)}
