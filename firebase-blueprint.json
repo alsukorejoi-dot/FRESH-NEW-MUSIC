@@ -1,0 +1,22 @@
+{
+  "entities": {
+    "AppData": {
+      "title": "AppData",
+      "description": "The global application state",
+      "type": "object",
+      "properties": {
+        "users": { "type": "array" },
+        "tracks": { "type": "array" },
+        "spotifyPlaylistId": { "type": "string" },
+        "weeklySchedule": { "type": "object" },
+        "adminPin": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "appData/{data}": {
+      "schema": "AppData",
+      "description": "Global state of the application"
+    }
+  }
+}

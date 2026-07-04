@@ -1,0 +1,71 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Spotify Authentication</title>
+    <style>
+      body { font-family: sans-serif; padding: 2rem; background: #111; color: #fff; text-align: center; }
+      .success { color: #1DB954; }
+      .error { color: #e74c3c; }
+    </style>
+  </head>
+  <body>
+    <h3 id="status">Authenticating...</h3>
+    <p id="details">Please wait while we complete the connection.</p>
+    <button id="closeBtn" style="display:none; margin-top:20px; padding:10px 20px;" onclick="window.close()">Close Window</button>
+
+    <script>
+      (async function() {
+        const searchParams = new URLSearchParams(window.location.search);
+        const code = searchParams.get('code');
+        const error = searchParams.get('error');
+
+        const statusEl = document.getElementById('status');
+        const detailsEl = document.getElementById('details');
+        const closeBtn = document.getElementById('closeBtn');
+
+        if (error) {
+           statusEl.className = 'error';
+           statusEl.innerText = 'Authentication Failed';
+           detailsEl.innerText = error;
+           if (window.opener) {
+             window.opener.postMessage({ type: 'SPOTIFY_AUTH_ERROR', error: error }, '*');
+             setTimeout(() => window.close(), 2000);
+           }
+           closeBtn.style.display = 'inline-block';
+           return;
+        }
+
+        if (code) {
+           if (window.opener) {
+             detailsEl.innerText = 'Sending code to main application...';
+             window.opener.postMessage({ type: 'SPOTIFY_AUTH_CODE', code: code }, '*');
+             statusEl.className = 'success';
+             statusEl.innerText = 'Success!';
+             detailsEl.innerText = 'You can now close this window and return to the app.';
+             setTimeout(() => window.close(), 1000);
+           } else {
+             // Fallback: If opener is null (some browsers strict isolation), 
+             // we can exchange the token here and save to localStorage, but we just need postMessage to work.
+             // We can use BroadcastChannel as a fallback
+             try {
+                const bc = new BroadcastChannel('spotify_auth');
+                bc.postMessage({ type: 'SPOTIFY_AUTH_CODE', code: code });
+                statusEl.className = 'success';
+                statusEl.innerText = 'Broadcasted Success!';
+                detailsEl.innerText = 'You can now close this window and return to the app.';
+             } catch (e) {
+                statusEl.className = 'error';
+                statusEl.innerText = 'Window Opener Lost';
+                detailsEl.innerText = 'Your browser blocked communication back to the app. Please close this window and try again using a different browser.';
+             }
+             closeBtn.style.display = 'inline-block';
+           }
+        } else {
+           statusEl.innerText = 'Invalid Request';
+           detailsEl.innerText = 'No code or error received from Spotify.';
+           closeBtn.style.display = 'inline-block';
+        }
+      })();
+    </script>
+  </body>
+</html>
