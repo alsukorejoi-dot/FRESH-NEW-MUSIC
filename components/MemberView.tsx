@@ -424,7 +424,12 @@ export const MemberView: React.FC<MemberViewProps> = ({ weeklySchedule, currentU
 
     // Regular check-in
     if (!hasCheckedInSelectedDate) {
-      await onCheckIn(selectedDateStr, winningAccount); 
+      try {
+        await onCheckIn(selectedDateStr, winningAccount); 
+      } catch (e: any) {
+        setError(e.message || "Gagal menyimpan absensi ke server. Periksa koneksi internet Anda.");
+        return;
+      }
       
       // If the checked-in day is Saturday (6) or Sunday (0), they get an extra bonus point.
       const checkDate = new Date(selectedDate);

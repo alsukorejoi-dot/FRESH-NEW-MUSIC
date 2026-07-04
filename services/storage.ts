@@ -47,13 +47,14 @@ export const storageService = {
             dailyUsedLastFmAccounts: record.dailyUsedLastFmAccounts || {}
         };
       } else {
-         console.warn("No data in Firebase yet, will try to fall back to local");
+         console.warn("No data in Firebase yet");
       }
     } catch (e: any) {
-      console.error("Firebase Fetch Error, falling back to local:", e);
+      console.error("Firebase Fetch Error:", e);
+      throw new Error("Gagal mengambil data dari server. Koneksi tidak stabil.");
     }
     
-    // 2. LOCAL MODE (FALLBACK)
+    // 2. LOCAL MODE (INITIAL BACKUP IF NO FIREBASE DATA EXISTS YET)
     const usersStr = localStorage.getItem(STORAGE_KEY_USERS);
     const tracksStr = localStorage.getItem(STORAGE_KEY);
     const spotifyIdStr = localStorage.getItem(STORAGE_KEY_SPOTIFY);
@@ -96,11 +97,9 @@ export const storageService = {
         this._updateLocalCache(data);
         return; // End early if save succeeded
     } catch (e: any) {
-        console.error("Firebase Save Error, saving locally only:", e);
+        console.error("Firebase Save Error:", e);
+        throw new Error("Gagal menyimpan ke server. Koneksi terputus.");
     }
-    
-    // 2. LOCAL MODE
-    this._updateLocalCache(data);
   },
 
   _updateLocalCache(data: AppData) {
